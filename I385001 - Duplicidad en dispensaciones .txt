@@ -1,0 +1,154 @@
+Queries TRAK
+-------------------------------------------
+select
+CodigoERP, FechaIngreso, HoraIngreso, FechaUltimoIntento, HoraUltimoIntento, FechaRespuesta, EstadoEnvio,
+HoraRespuesta, TipoMovimiento,
+*
+from Custom_User.DispensacionesERP
+where
+Episodio = 'H0001163374'
+and NroDocumento = 'I2304090173'
+--and CodigoERP = '12939103'
+order by 1, 2, 3
+
+select 
+ordItemTrak,
+*
+from Custom_HMIL_User.Omnicell2Disp 
+where numeroPrescripcion like ('I2304090173%')
+order by 1, 9,11
+
+
+Queries SAP
+--------------------------------------------
+set schema SBOHMSPRD;
+
+select
+T0."DocEntry", T0."DocNum", T1."ItemCode", T1."Dscription", T0."CreateDate", T0."CreateTS", T1."ItemCode", T1."Quantity"
+from OIGE T0
+inner join IGE1 T1 on T0."DocEntry" = T1."DocEntry"
+where 1 = 1
+and T0."U_CO_idtrak" = 'I2304090173'
+and T0."U_CO_episodio" = 'H0001163374';
+--and T1."ItemCode" = '12939103';
+
+select
+T0."DocEntry", T0."DocNum", T1."ItemCode", T1."Dscription", T0."CreateDate", T0."CreateTS", T1."ItemCode", T1."Quantity"
+from OIGN T0
+inner join IGN1 T1 on T0."DocEntry" = T1."DocEntry"
+where 1 = 1
+and T0."U_CO_idtrak" = 'I2304090173'
+and T0."U_CO_episodio" = 'H0001163374'
+--and T1."ItemCode" = '12939103';
+
+
+OVERIDE
+
+OE_DISPENSING
+
+
+Cuando se duplica: Se generan Group IDs Diferentes
+Cuando se dispensa de forma parcializada el Group id es igual
+
+OrderRef y TipoMovimiento
+Suma de las entradas y las salidas
+
+Solucion:
+------------------------------
+Class: 
+	. Custom.ERP.StockHandler
+Methods:
+	. ReturnToERPBodegasPerifesricas *
+	. SentToERPFromKardex *
+	. StockUnPacked *
+	. StockPackedERP *
+	
+Ajustes:
+-------------------------------
+. Add Method to the class
+	ClassMethod isDispensable(tOrderRef, tTipoMovimiento, tCantADisp) As %Numeric
+	{
+		//do ##class(Custom.ERP.StockHandler).isDispensable("3140769||36", "S002",1)
+		
+		Set exist = 0
+		
+		Set tORD = $Piece(tOrderRef,"||",1)
+		Set tITM = $Piece(tOrderRef,"||",2)
+		
+		// Cantidad solicitada
+		set cantSol = 0
+		set (tCantidad,tSubcategoriaType) = ""
+		Set OEORIItmMastDR=$Piece(^OEORD(tORD,"I",tITM,1),"^",2)
+		Set ARCIMSubscript=+OEORIItmMastDR	
+		Set ARCIMVersion=$Piece(OEORIItmMastDR,"||",2)
+		Set ARCIMItemCatDR=$Piece($Get(^ARCIM(ARCIMSubscript,ARCIMVersion,1)),"^",10)
+		Set tSubcategoriaType = $Piece($Get(^ARC("IC", ARCIMItemCatDR)),"^",7) 
+		
+		if ($g(tSubcategoriaType) = "R") || ($g(tSubcategoriaType) = "I")
+		{
+			set tCantidad = 0
+			set qty=$piece($get(^OEORD(tORD,"I",tITM,1)),"^",12)
+			set uom=$piece($get(^OEORD(tORD,"I",tITM,2)),"^",3)
+			set arcim=$piece($get(^OEORD(tORD,"I",tITM,1)),"^",2)
+			set drgform=$piece($get(^ARCIM(+arcim,1,1)),"^",12)
+			set tCantidad = $$calcqty^aOET7(drgform,uom,qty)
+				
+		}
+		else
+		{
+			set tCantidad =  $piece($get(^OEORD(tORD,"I",tITM,1)),"^",12)
+		}
+		
+		set cantSol = tCantidad
+		
+		// Cantidad dispensada
+		&sql(
+			select 
+			isnull(sum(case when TipoMovimiento='S002' then Cantidad else -1*Cantidad end),0) CantDisp into :cantDisp
+			from Custom_User.DispensacionesERP
+			where 1=1
+			and OrderRef = :tOrderRef
+		)
+		
+		//Cantidad despues de dispensar
+		Set cantAbierta = -1
+		
+		If tTipoMovimiento = "S002"
+		{
+			Set cantAbierta = cantSol - cantDisp - tCantADisp
+			If cantAbierta < 0 set exist = 1  
+		}
+		else
+		{
+			Set cantAbierta = cantSol - cantDisp + tCantADisp
+			If cantAbierta > cantSol set exist = 1
+		}
+		
+		Quit exist
+	}
+. Modify Save point:
+	- from:
+		Set tSC = tObjToInsert.%Save()
+	- to:
+		set saveObj = ..isDispensable(tId, tObjToInsert.TipoMovimiento, tObjToInsert.Cantidad)
+		If saveObj = 0 Set tSC = tObjToInsert.%Save()
+		else 
+			Set tSC = $$$ERROR(-30015,"Cantidad a dispensar o devolver invalida")
+		Hang 0.5
+	
+	-to (for kardex): 
+    set saveObj = ..isDispensable(tId, tObjToInsert.TipoMovimiento, tObjToInsert.Cantidad)
+		If saveObj = 0
+			{
+				Set tSC = tObjToInsert.%Save()
+				do ##class(Custom.ERP.StockHandler).UpdateManualStock(tObjOrder.OEORIRecDepDR.%Id(),tObjOrder.OEORIItmMastDR.ARCIMCode,pQty,"-","","")
+			}
+			else
+			{
+				Set tSC = $$$ERROR(-30015,"Cantidad a dispensar o devolver invalida")
+			}
+			Hang 0.5
+	
+tObjToInsert.OrderRef, tObjToInsert.Cantidad, tObjToInsert.TipoMovimiento, tObjToInsert.NroDocumento, tObjToInsert.Episodio, tObjToInsert.CodigoERP, tObjToInsert.ProcIngreso
+
+tOrderRef, tCantidad, tTipoMovimiento, tNroDocumento, tEpisodio, tCodigoERP, tProcIngreso
