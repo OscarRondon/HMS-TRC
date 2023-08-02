@@ -1,0 +1,707 @@
+
+Queries:
+--------------------------------------------------
+select 
+*
+from Custom_HMIL_User.Omnicell2Disp 
+where 
+fechaOriginal >= '2023-08-01'
+and numeroEstadia = 'H0001165025'
+and codArticuloOmn = '10400103' 
+and numeroPrescripcion = 'OVERRIDE'
+--and IdRegistro ='RXC-0040027197'
+
+select *
+from Custom_User.DispensacionesERP
+where
+FechaIngreso >= '2023-08-01'
+and Episodio = 'H0001165025'
+and CodigoERP = '10400103'
+and orderRef in ('3209885||857')
+--where %id = 5866412
+
+
+select
+*
+from
+Custom_HMIL_User.Omnicell2DispRevisiones
+where
+fecha >= '2023-08-01'
+
+
+ select 
+ OEORI_LabEpisodeNo, OEORI_ARCOS_DR, OEORI_APPT_DR->APPT_EBEI, OEORI_Billed, OEORI_ItemStat_DR->OSTAT_Desc, 
+ OEORI_ItmMast_DR->ARCIM_code, OEORI_ItmMast_DR->ARCIM_desc,*
+from OE_OrdItem
+where %id in ('3209885||857')
+
+
+Clase en SMP
+--------------------------------------------------------
+Custom.Omnicell2.Orders >
+
+ClassMethod Recive(pRequest As Custom.Omnicell2.DispOmn2) As %Status
+{
+	Set ^zOscarRondon($ZDATETIME($NOW()), 1,1, "pRequest.idRegistro") = pRequest.idRegistro
+	Set ^zOscarRondon($ZDATETIME($NOW()), 1,2, "pRequest.codOmnicell") = pRequest.codOmnicell
+	Set ^zOscarRondon($ZDATETIME($NOW()), 1,3, "pRequest.codArticulo") = pRequest.codArticulo
+	Set ^zOscarRondon($ZDATETIME($NOW()), 1,4, "pRequest.cantidad") = pRequest.cantidad
+	Set ^zOscarRondon($ZDATETIME($NOW()), 1,5, "pRequest.movimiento") = pRequest.movimiento
+	Set ^zOscarRondon($ZDATETIME($NOW()), 1,6, "pRequest.numeroDocumento") = pRequest.numeroDocumento
+	Set ^zOscarRondon($ZDATETIME($NOW()), 1,7, "pRequest.numeroEstadia") = pRequest.numeroEstadia
+	Set ^zOscarRondon($ZDATETIME($NOW()), 1,8, "pRequest.numeroFicha") = pRequest.numeroFicha
+	Set ^zOscarRondon($ZDATETIME($NOW()), 1,9, "pRequest.rut") = pRequest.rut
+	Set ^zOscarRondon($ZDATETIME($NOW()), 1,10, "pRequest.tipoMensaje") = pRequest.tipoMensaje
+	Set ^zOscarRondon($ZDATETIME($NOW()), 1,11, "pRequest.usuario") = pRequest.usuario
+	Set ^zOscarRondon($ZDATETIME($NOW()), 1,12, "pRequest.fechaMovimiento") = pRequest.fechaMovimiento
+	
+	
+	Set tSC = $System.Status.OK()
+	Try
+	{
+		set tValida = 1
+		////Revisar si el Omnicell tiene configurado la salida de HL7
+		/*
+		set tIdLocal = ""
+		set tCodOmnicell = pRequest.codOmnicell
+		if tCodOmnicell'=""
+		{
+			&sql(select Top 1 %Id into :tIdLocal
+				from SQLUser.CT_Loc
+				where CTLOC_ExternalInfoSystem='GENERIC'
+				  and CTLOC_TelephoneExt = :tCodOmnicell
+				  and CTLOC_HL7OrdersLink is not null
+				)
+				
+			if tIdLocal = "" 
+			{
+				quit
+			}
+			
+		}
+		*/
+		//Revisa que el id de registro no exista
+		set tIdRegistroExist = ""
+		set tIdRegistroOmnicell = pRequest.idRegistro
+		&sql(select top 1 %id into :tIdRegistroExist
+			from Custom_HMIL_User.Omnicell2Disp 
+			where idRegistro = :tIdRegistroOmnicell)
+		if SQLCODE '=0 set tIdRegistroExist = ""
+		
+		Set ^zOscarRondon($ZDATETIME($NOW()), 2,1, "tIdRegistroExist") = tIdRegistroExist
+		if tIdRegistroExist '= ""
+		{
+			&sql(insert into Custom_HMIL_User.Omnicell2DispRevisiones (Omnicell2Disp,fecha,hora,estado)
+				values(:tIdRegistroExist,current_date,current_time,'Reintento') 
+				)
+			
+			set tValida = 0
+			quit
+		}
+		
+		
+		/// Ingresar nuevo Registro
+		set tFechaOriginal = ""
+		set tFechaOriginal = $extract(pRequest.fechaMovimiento,1,8)
+		if tFechaOriginal '= ""
+		{
+			try{ set tFechaOriginal = $zdh(tFechaOriginal,8)}Catch (tException){set tFechaOriginal = $p($h,",",1) }
+		}
+		
+		set tHoraOriginal = ""
+		set tHoraOriginal = $extract(pRequest.fechaMovimiento,9,10)_":"_$extract(pRequest.fechaMovimiento,11,12)_":"_$extract(pRequest.fechaMovimiento,13,14)
+		if tHoraOriginal '= ""
+		{
+			try{ set tHoraOriginal = $zth(tHoraOriginal)}Catch (tException){set tHoraOriginal = $p($h,",",2) }
+		}
+		
+		
+		set tnumeroEstadia = ""
+		set tnumeroEstadia = ..GetNroEstadiaOmnicell(pRequest.numeroEstadia)
+		set tIdOmnicell=""
+		set objDispOmnicell = ##class(Custom.HMIL.User.Omnicell2Disp).%New()
+		
+		set objDispOmnicell.bodega = pRequest.codOmnicell
+		set objDispOmnicell.movimiento = pRequest.movimiento
+		if pRequest.movimiento = "-"
+		{
+			set objDispOmnicell.cantidadDisp = (pRequest.cantidad * -1)
+		}
+		else
+		{
+			set objDispOmnicell.cantidadDisp = pRequest.cantidad
+		}
+		set objDispOmnicell.codArticuloOmn = pRequest.codArticulo
+		set objDispOmnicell.fecha = +$h
+		set objDispOmnicell.fechaOriginal = tFechaOriginal
+		set objDispOmnicell.hora = $piece($h,",",2)
+		set objDispOmnicell.horaOriginal = tHoraOriginal
+		set objDispOmnicell.idRegistro = pRequest.idRegistro
+		set objDispOmnicell.numeroEstadia = tnumeroEstadia
+		set objDispOmnicell.numeroFicha = pRequest.numeroFicha
+		set objDispOmnicell.numeroPrescripcion = pRequest.numeroDocumento
+		set objDispOmnicell.movimiento = pRequest.movimiento
+		set objDispOmnicell.procesado = "N"
+		set objDispOmnicell.usuario = pRequest.usuario
+		
+		do objDispOmnicell.%Save()
+		
+		Set ^zOscarRondon($ZDATETIME($NOW()), 3,1, "objDispOmnicell") = objDispOmnicell
+		
+		if $IsObject(objDispOmnicell)
+		{
+			set tIdOmnicell = objDispOmnicell.%Id()
+			set tIdOmincellObj = objDispOmnicell.%Id()
+			
+			set tObjRevision = ##class(Custom.HMIL.User.Omnicell2DispRevisiones).%New()
+			set tObjRevision.estado = "Ingresado"
+			set tObjRevision.fecha = +$h
+			set tObjRevision.hora = $piece($h,",",2)
+			set tObjRevision.Omnicell2Disp = objDispOmnicell
+			
+			do tObjRevision.%Save()
+		}
+		
+		set tMovimiento = pRequest.movimiento
+		if $get(tMovimiento) = "" set tMovimiento = "+"
+		
+		//Verifica Artículo
+		set tipoItem = ""
+		set (tIdArcim,codArticulo)=""
+		set codArticulo = pRequest.codArticulo
+		if codArticulo '=""
+		{
+			set tIdArcim = ##class(web.ARCItmMast).GetIdFromCodeOrDescription(codArticulo)
+			
+			if tIdArcim = "" 
+			{
+				set objDispOmnicell.errorDescription = objDispOmnicell.errorDescription_" - Código Articulo: "_codArticulo_" no existe", objDispOmnicell.tipoError = 1
+				set tValida = 0
+			}
+			else
+			{
+				 set tipoItem= "INS"
+				 if $piece(^ARCIM(+tIdArcim,1,1),"^",12) '= "" set tipoItem = "FAR"
+				 do objDispOmnicell.itemMastTrakSetObjectId(tIdArcim)
+			}
+			
+			set objDispOmnicell.tipoArticulo = tipoItem
+			
+		}
+		
+		Set ^zOscarRondon($ZDATETIME($NOW()), 4,1, "tipoItem") = tipoItem
+		
+		//Verifica Nro de Episodio
+		set (tIdPaadm,tIdPatMas) = ""
+		//set tnumeroEstadia = pRequest.numeroEstadia
+		if tnumeroEstadia'=""
+		{
+			set tIdPaadm = $order(^PAADMi("No",$ZCONVERT(tnumeroEstadia,"U"),""))
+			if tIdPaadm = "" 
+			{
+				set objDispOmnicell.errorDescription = objDispOmnicell.errorDescription_" - Número de Episodio no existe", objDispOmnicell.tipoError = 1
+				set tValida = 0
+			}
+			else
+			{
+				set tIdPatMas = $piece(^PAADM(tIdPaadm),"^",1)
+				if tIdPatMas '= "" do objDispOmnicell.idPatientTrakSetObjectId(tIdPatMas)
+			}
+		}
+		
+		//Verifica Local
+		set tIdLocal = ""
+		set tCodOmnicell = pRequest.codOmnicell
+		if tCodOmnicell'=""
+		{
+			&sql(select Top 1 %Id into :tIdLocal
+				from SQLUser.CT_Loc
+				where CTLOC_ExternalInfoSystem='GENERIC'
+				  and CTLOC_TelephoneExt = :tCodOmnicell
+				)
+				
+			if tIdLocal = "" 
+			{
+				set objDispOmnicell.errorDescription = objDispOmnicell.errorDescription_" - Código de Omnicell no está asociado a Omnicell", objDispOmnicell.tipoError = 1
+				set tValida = 0
+			}
+			else
+			{
+				do objDispOmnicell.localTrakSetObjectId(tIdLocal)
+			}
+		}
+		
+		///Valida Cantidad
+		set tCantidad = pRequest.cantidad
+		if ($get(tCantidad)="") || ($get(tCantidad)) = 0 set tValida=0
+		
+		
+		do objDispOmnicell.%Save()
+		
+		
+		///Obtener Usuario
+		set tUserFromOmn = pRequest.usuario 
+		if tUserFromOmn = "" set tUserFromOmn = "intDisp"
+		set tIdUser = ..GetTrakUser(tUserFromOmn)
+			
+		
+		///Procesar Dispensación
+		set tnumeroDocumento = pRequest.numeroDocumento
+		set ^jb("Omn2recive",1)="1 presc "_tnumeroDocumento
+		///Receta Conocida
+		
+		Set ^zOscarRondon($ZDATETIME($NOW()), 5,1, "tnumeroDocumento") = tnumeroDocumento
+		Set ^zOscarRondon($ZDATETIME($NOW()), 5,2, "tnumeroDocumento") = tnumeroDocumento
+		Set ^zOscarRondon($ZDATETIME($NOW()), 5,4, "tValida") = tValida
+		
+		if tnumeroDocumento'="", tnumeroDocumento'="OVERRIDE", tValida=1
+		{
+			set (tNroPresc,tNroSeq)=""
+			//Numero de receta conocido
+			set tNroPresc = $piece(tnumeroDocumento,".",1)
+			set tNroSeq = $piece(tnumeroDocumento,".",2)
+			if tNroSeq = "" set tNroSeq = 1
+			
+			set ^jb("Omn2recive",2)="2 tNroPresc "_tNroPresc_" tNroSeq "_tNroSeq
+			
+			Set tUsuarioID = tIdUser //##class(web.SSUser).GetIdFromCodeOrDescription("intDisp")
+			
+			////Dispensaciones de Fármacos con Recetas
+			If (tipoItem = "FAR") && (tMovimiento="+")
+			{
+				set ^jb("Omn2recive",3)="3 tNroPresc "_tNroPresc_" tNroSeq "_tNroSeq
+				set tEntregada = pRequest.cantidad
+				Set tDispensed = 0
+				Set tDispesar = tEntregada
+				
+				///Definir más condiciones como estado de la order, verificar si es el mismo item, verificar si realmente es necesario que esté definida como Omnicell
+				&SQL(DECLARE ctItems CURSOR FOR
+					 select %NOLOCK Top 1 %ID, OEORI_RecDep_DR,OEORI_OEORD_ParRef->OEORD_Adm_DR, OEORI_OEORD_ParRef->OEORD_Adm_DR->PAADM_PAPMI_DR
+					 INTO :tOrderItemId, :tRecLocation , :tPaadmId, :tPatMasId
+						from SQLUser.OE_OrdItem
+						where OEORI_PrescNo = :tNroPresc
+							--and OEORI_ItmMast_DR = :tItemId
+							and OEORI_PharmacyStatus like '%A%'
+							and $piece(OEORI_PrescSeqNo,'/',1) = :tNroSeq
+							and OEORI_RecDep_DR->CTLOC_ExternalInfoSystem='GENERIC')
+				
+				&SQL(OPEN ctItems)
+				&SQL(FETCH ctItems)
+				while(SQLCODE=0)
+				{
+									 
+					set ^jb("Omn2recive",4)="4 tOrderItemId "_tOrderItemId
+					Set tFactor=##class(Custom.HMIL.Stock.Util).CalcDoseEQ(tOrderItemId)
+					Set ord = $Piece(tOrderItemId,"||",1)
+					Set itm = $Piece(tOrderItemId,"||",2)
+									
+					Set qty=$piece($get(^OEORD(ord,"I",itm,1)),"^",12)
+			 		Set uom=$piece($get(^OEORD(ord,"I",itm,2)),"^",3)
+			 		Set arcim=$piece($get(^OEORD(ord,"I",itm,1)),"^",2)
+			 		Set drgform=$piece($get(^ARCIM(+arcim,1,1)),"^",12)
+			 	
+			 		set tRoundInd = ""
+			 		if drgform '= "" 
+			 		{
+				 		set tRoundInd = ""
+				 		set tObjDrugForm = ##class(User.PHCDrgForm).%OpenId(drgform)
+				 		if $IsObject(tObjDrugForm)
+						{
+							set tRoundInd = tObjDrugForm.PHCDFRoundIndivAdmin
+						}
+				 		
+				 					 		
+				 		if $get(tRoundInd) '= "Y"
+				 		{
+				 			Set SendedOrderQty = +$$calcqty^aOET7(drgform,uom,qty)
+				 		}
+				 		else
+				 		{
+					 		Set SendedOrderQty = ##class(Custom.HMIL.Stock.Util).CalcTotalDispense(tOrderItemId)
+				 		}
+			 		}
+			 		else
+			 		{
+				 		Set SendedOrderQty = qty
+			 		}
+			 		
+					Set tPreDispensed = 0
+					&SQL(select %NOLOCK sum(ISNULL(DSP_Qty,0)) - sum(ISNULL(DSP_ReturnQty,0)) INTO :tPreDispensed from sqlUser.OE_Dispensing where DSP_OEORE_ParRef->OEORE_OEORI_ParRef = :tOrderItemId)
+					if SQLCODE'=0 set tPreDispensed = 0
+					if tPreDispensed = "" set tPreDispensed = 0
+					
+					set tDispensedLeft = 0
+					set tDispensedLeft = SendedOrderQty-tPreDispensed
+					
+					if tEntregada > tDispensedLeft
+					{
+						set tMayorDiferencia = tEntregada-(tDispensedLeft)
+						set tEntregada = SendedOrderQty-tPreDispensed
+						
+						set objDispOmnicell.cantidadProcesada = tEntregada
+						set objDispOmnicell.procesado = "S"
+						set objDispOmnicell.tipoError = "FAR"
+						set objDispOmnicell.errorDescription = objDispOmnicell.errorDescription_" - Sólo se dispensaron "_tEntregada_" de "_tCantidad 
+						if tOrderItemId '= "" do objDispOmnicell.ordItemTrakSetObjectId(tOrderItemId)
+						
+						do objDispOmnicell.%Save()
+					}
+					else
+					{
+						set objDispOmnicell.cantidadProcesada = tEntregada
+						set objDispOmnicell.procesado = "S"
+						if tOrderItemId '= "" do objDispOmnicell.ordItemTrakSetObjectId(tOrderItemId)
+						
+						do objDispOmnicell.%Save()
+					}
+					set ^jb("Omn2recive",5)="5 tOrderItemId "_tOrderItemId_" tDispensedLeft "_tDispensedLeft_" tDispensed "_tDispensed_" tEntregada "_tEntregada
+					if tDispensedLeft > 0
+					{
+						set ^jb("Omn2recive","5.1")=51
+						
+						//Definir si es necesario controlar contra stock
+						set tPhysQtyAvailable = tEntregada
+						
+						set ^jb("Omn2recive","5.2")=52
+						if tPhysQtyAvailable >= tEntregada
+						{
+							set ^jb("Omn2recive","5.3")=53
+							set tTotalDispSoFar = ""
+							
+							Set tPending = tEntregada * tFactor
+							If (tDispensed < tEntregada)
+							{
+								set ^jb("Omn2recive","5.4")=54
+								set tLastRowExecId = ""
+								&SQL(DECLARE ctExecItems CURSOR FOR
+									Select %NOLOCK %ID, OEORE_PhQtyOrd INTO :tOEOrdExecID, :tOrderQty
+										From SQLUser.OE_OrdExec
+										where OEORE_OEORI_ParRef = :tOrderItemId)
+								&SQL(OPEN ctExecItems)
+								&SQL(FETCH ctExecItems)
+								while(SQLCODE=0){
+									
+									set ^jb("Omn2recive","5.5")=55
+									Set pDispensed = 0
+									set tLastRowExecId = tOEOrdExecID
+									set pDispensed = ##class(Custom.HMIL.Stock.Util).CalcCurrentDispByExec(tOEOrdExecID)
+									set ^jb("Omn2recive","5.6")=56
+									if $get(tRoundInd) = "Y"
+									{
+										set tOrderQty = ##class(Custom.HMIL.Stock.Util).CalcTotalByExec(tOEOrdExecID)
+									}
+									set ^jb("Omn2recive","5.7")=57
+							
+									Set tDisponible = tOrderQty - pDispensed
+									
+									set ^jb("Omn2recive","5.8")=58
+									If ((tDisponible>0)&&(tPending>0))
+									{
+										if (tPending < tDisponible) && (tPending>0)
+										{
+											set tDisponible = tPending
+										}	
+								
+										if (tDisponible > 0)
+										{	set tDispensing = ""					
+											if tFactor'= 0 
+											{
+												set tDispensing = $FNUMBER((tDisponible/tFactor),"",12)
+												set tDispensedLeft = tDispensedLeft-tDispensing
+											}
+											
+											Set tSC = ##class(Custom.Kardex.Orders).PharmExecute(tOrderItemId, tOEOrdExecID, tDispensing, tUsuarioID)
+										}
+								
+								
+										//Set tDispensed = tDispensed + tDispensing
+										Set tPending = tPending - tDisponible
+				
+									}
+									&SQL(FETCH ctExecItems)
+								}
+								&SQL(CLOSE ctExecItems)
+							}
+							
+							set ^jb("Omn2recive","5.9")=59
+							if (tPending > 0) && (tLastRowExecId'="") && (tDispensedLeft>0)
+							{
+								set tDispensing = ""					
+								set tDispensing = tDispensedLeft
+								Set tSC = ##class(Custom.Kardex.Orders).PharmExecute(tOrderItemId, tLastRowExecId, tDispensing, tUsuarioID)
+							}
+					
+					
+							set ^jb("Omn2recive",6)="6 tEntregada "_tEntregada
+							// Estados de Farmacia Orden
+							if (tEntregada > 0) Set tSC = ##class(Custom.Kardex.Orders).UpdateOrderState(tNroPresc)
+					
+							
+						}
+						
+						set ^jb("Omn2recive",7)="7 tEntregada "_tEntregada
+						//if (tEntregada > 0) job ##class(Custom.ERP.StockHandler).SentToERPFromKardex(tOrderItemId,tEntregada,"")
+						Set ^zOscarRondon($ZDATETIME($NOW()), 5,5, "tEntregada") = tEntregada
+						Set ^zOscarRondon($ZDATETIME($NOW()), 5,6, "##class(Custom.ERP.StockHandler).SentToERPFromOmnicell2") = "Si tEntregada > 0"
+						if (tEntregada > 0) job ##class(Custom.ERP.StockHandler).SentToERPFromOmnicell2(tOrderItemId,tEntregada,tIdLocal,"")
+						
+					}
+					&SQL(FETCH ctItems)
+				}
+				&SQL(CLOSE ctItems)
+				
+			}
+			
+			//Devoluciones de Fármacos con Recetas
+			If (tipoItem = "FAR") && (tMovimiento="-")
+			{
+				set ^jb("Omn2Dev",1)= "tNroPresc "_tNroPresc_" tNroSeq  "_tNroSeq
+				&SQL(select %NOLOCK Top 1 %ID, OEORI_RecDep_DR,OEORI_OEORD_ParRef->OEORD_Adm_DR, OEORI_OEORD_ParRef->OEORD_Adm_DR->PAADM_PAPMI_DR
+					 INTO :tOrderItemId, :tRecLocation , :tPaadmId, :tPatMasId
+					 from SQLUser.OE_OrdItem
+					 where OEORI_PrescNo = :tNroPresc
+					   --and OEORI_ItmMast_DR = :tItemId
+					   and OEORI_PharmacyStatus like '%A%'
+					   and $piece(OEORI_PrescSeqNo,'/',1) = :tNroSeq
+					   and OEORI_RecDep_DR->CTLOC_ExternalInfoSystem='GENERIC')
+					   
+				if SQLCODE'=0 set tOrderItemId = ""
+				
+				
+				set ^jb("Omn2Dev",2)= "tOrderItemId "_tOrderItemId_" tCantidad  "_tCantidad
+				
+				Set ^zOscarRondon($ZDATETIME($NOW()), 5,7, "tEntregada") = tOrderItemId
+				
+				if tOrderItemId '= ""
+				{
+					Set ^zOscarRondon($ZDATETIME($NOW()), 5,8, "do ..GetReturnDisp") = "Si tOrderItemId '= ''"
+					set ^jb("Omn2Dev",3)= "tOrderItemId "_tOrderItemId_" tCantidad  "_tCantidad
+					do ..GetReturnDisp(tNroPresc, tOrderItemId , tCantidad, objDispOmnicell,tIdUser)
+				}
+				
+				
+
+			}		
+		
+		}
+		///Casos de dispesaciones Directas sin recetas
+		if (tnumeroDocumento="OVERRIDE"),tValida=1
+		{
+			
+			//Ajuste para algunos fármacos que se requiere que se comporten como insumo (ej: sueros)
+			
+			set tActiveList = ""
+			set tActiveList = ##class(Custom.Nexus.CS.ConfigRegistry).GetActive("Codigos.Farmacos.Omnicell.Insumos")
+			if $get(tActiveList)
+			{
+				set CodListItems = ""
+				set CodListItems = ##class(Custom.Nexus.CS.ConfigRegistry).GetConfigValueFor("Codigos.Farmacos.Omnicell.Insumos")
+						
+				if $get(CodListItems)'=""
+				{
+					if (","_CodListItems_",") [ (","_$get(codArticulo)_",")
+					{
+						set tipoItem="INS"
+					}
+				}
+			}
+					
+			
+			Set ^zOscarRondon($ZDATETIME($NOW()), 6,1, "tipoItem") = tipoItem
+			
+			set ^jb("Omn2Ins",1)="tipoItem "_tipoItem_" tMovimiento "_tMovimiento
+			if tipoItem = "INS"
+			{
+				////Dispensacion de Insumos sin Receta
+				if tMovimiento = "+"
+				{
+					set ^jb("Omn2Ins",2)="tipoItem "_tipoItem_" tMovimiento "_tMovimiento_" tIdPaadm "_tIdPaadm_" tIdUser "_tIdUser
+					
+					&SQL(SELECT %NOLOCK Top 1 %ID, PAADM_PAPMI_DR,PAADM_AdmDate,PAADM_AdmTime,PAADM_DischgDate,PAADM_DischgTime 
+						into :tEpisodeID, :PAPMIID, :tAdmDate,:tAdmTime,:tDischDate,:tDischTime 
+						FROM SQLUser.PA_Adm 
+						where %id = :tIdPaadm
+						)
+					
+					
+					set ^jb("Omn2Ins",3)="tFechaOriginal "_tFechaOriginal_" tHoraOriginal "_tHoraOriginal_" tIdArcim "_tIdArcim_" tCantidad "_tCantidad_" tIdLocal "_tIdLocal
+						
+					if ($get(tAdmDate) '= "") && (tFechaOriginal < $get(tAdmDate))
+					{
+						set tFechaOriginal = tAdmDate
+						set tHoraOriginal = tAdmTime
+					}
+						
+					if ($get(tDischDate) '= "") && (tFechaOriginal > $get(tDischDate))
+					{
+						set tFechaOriginal = tDischDate
+						set tHoraOriginal = tDischTime
+					}
+						
+					
+					set tOK=##class(Custom.HMIL.Integration.ANITA.OEOrdItem).AddOrder(tEpisodeID,tIdArcim,tIdUser,tCantidad,tIdLocal,,tFechaOriginal,tHoraOriginal,,6,,,,,"","TB","")	
+				    
+				    set ^jb("Omn2Ins",4)="tOK "_tOK
+				    
+				    if tOK 
+					{
+						set tIdRegistroOmnicellERP = ""
+						if tIdRegistroOmnicell '= ""
+						{
+							set tIdRegistroOmnicellERP = "OMN"_pRequest.idRegistro
+						}
+							
+						&sql(update %NOTRIGGER SQLUSer.OE_OrdItem
+							(oeori_orddept_dr, OEORI_BBExtCode)
+							values (:tIdLocal, :tIdRegistroOmnicellERP) 
+							where oeori_rowid=:tOK)
+							
+						set objDispOmnicell.cantidadProcesada = tCantidad
+						set objDispOmnicell.procesado = "S"
+						if tOK '= "" do objDispOmnicell.ordItemTrakSetObjectId(tOK)
+						
+						do objDispOmnicell.%Save()
+						
+						Set ^zOscarRondon($ZDATETIME($NOW()), 6,2, "tCantidad") = tCantidad
+						Set ^zOscarRondon($ZDATETIME($NOW()), 6,3, "##class(Custom.ERP.StockHandler).SentToERPFromKardex") = "Si tCantidad > 0"
+						if (tCantidad > 0) 
+						{
+							job ##class(Custom.ERP.StockHandler).SentToERPFromKardex(tOK,tCantidad,tIdUser)	
+						}
+					
+					}
+				}
+				
+				
+				////Devoluciones de Insumos sin Recetas
+				if tMovimiento = "-"
+				{
+					//do ..GetOrderToReturnInsumos(pRequest,tIdPaadm,tIdArcim,tIdLocal)
+					
+					Set (tOrderId,TextName,tItems,tErrorDescription,tEpisodeId,PAPMIID,Internal,tIdRegistroOmnicell) = ""
+					Set tOrderId = ""
+					Set tItems = "" 
+					Set tEpisodeId = ""
+					
+					set tIdRegistroOmnicell = pRequest.idRegistro
+		
+					set tRestantePorRetornar = tCantidad
+					set tListIdDisp = ""
+		
+					&SQL(DECLARE dEpisodeOrdersIns CURSOR FOR
+						Select %NOLOCK %ID, OEORI_PhQtyOrd, OEORI_PrescNo, OEORI_ItemStat_DR->OSTAT_Code 
+						INTO :tOEItemId, :tOEORIPhQtyOrd, :tOEORIPrescNo,:tCodStatusOrder
+						from SQLUser.OE_OrdItem 
+						where OEORI_OEORD_ParRef->OEORD_Adm_DR = :tIdPaadm
+						  and OEORI_ItmMast_DR = :tIdArcim
+						  and OEORI_ItemStat_DR->OSTAT_Code = 'E'
+						  and OEORI_RecDep_DR = :tIdLocal
+						  and OEORI_Billed <> 'P'
+						order by OEORI_SttDat desc, OEORI_SttTim desc
+						)
+			
+					&SQL(OPEN dEpisodeOrdersIns)
+					&SQL(FETCH dEpisodeOrdersIns)
+					set tLastOrderId = ""
+					while(SQLCODE = 0)
+					{
+						if tOEItemId '= ""
+						{
+							set tLastOrderId = tOEItemId
+							if tOEORIPhQtyOrd = "" set tOEORIPhQtyOrd = 0
+							set tCantidadOrder = tOEORIPhQtyOrd
+				
+							if (tCantidadOrder > 0) && (tRestantePorRetornar>0) 
+							{
+								set tCantidadToReturn = 0
+		  					
+		  						if (tCantidadOrder > tRestantePorRetornar)
+		  						{	
+			  						set tCantidadToReturn = tRestantePorRetornar
+		  						}
+		  						else
+		  						{
+			  						set tCantidadToReturn = tCantidadOrder
+		  						}
+		  			
+		  			
+		  					
+								if tCantidadOrder = tCantidadToReturn
+								{
+									do ChangeStatus^COEOrdItem5(tOEItemId,"D",tIdUser,"","")
+									set tRestantePorRetornar = tRestantePorRetornar - tCantidadToReturn
+						
+									set tIdRegistroOmnicell = "OMN"_$get(tIdRegistroOmnicell)
+						
+									&SQL(Update %nolock %notrigger SQLUser.OE_OrdItem
+							 			set   OEORI_BBExtCode	= :tIdRegistroOmnicell
+							 			where %id = :tOEItemId  
+							 			)
+								}
+								else
+								{
+									set tIdRegistroOmnicell = "OMN"_$get(tIdRegistroOmnicell)
+						
+									&SQL(Update %nolock %notrigger SQLUser.OE_OrdItem
+							 			set OEORI_PhQtyOrd =  OEORI_PhQtyOrd - :tCantidadToReturn,
+							 			OEORI_BBExtCode	= :tIdRegistroOmnicell
+							 			where %id = :tOEItemId  
+							 		)
+							 
+									set tRestantePorRetornar = tRestantePorRetornar - tCantidadToReturn
+								}
+								
+								Set ^zOscarRondon($ZDATETIME($NOW()), 6,4, "tCantidadToReturn") = tCantidadToReturn
+								Set ^zOscarRondon($ZDATETIME($NOW()), 6,5, "##class(Custom.ERP.StockHandler).ReturnOmnicellSuppliesToERP") = "Si tCantidadToReturn > 0"
+								if tCantidadToReturn > 0 
+								{
+									job ##class(Custom.ERP.StockHandler).ReturnOmnicellSuppliesToERP(tOEItemId,tCantidadToReturn,tIdUser)
+								}
+					
+							}
+						}
+			
+						&SQL(FETCH dEpisodeOrdersIns)
+					}
+		
+					&SQL(CLOSE dEpisodeOrdersIns)
+		
+					if (tRestantePorRetornar>0)
+					{ 
+						set objDispOmnicell.cantidadProcesada = tCantidad-tRestantePorRetornar
+						set objDispOmnicell.procesado = "S"
+						set objDispOmnicell.tipoError = "INS"
+						set objDispOmnicell.errorDescription = objDispOmnicell.errorDescription_" - Quedaron "_tRestantePorRetornar_" unidades no devueltas en TrakCare" 
+						
+						do objDispOmnicell.%Save()
+					}	 	
+		
+					if tRestantePorRetornar = 0
+					{
+						set objDispOmnicell.cantidadProcesada = tCantidad
+						set objDispOmnicell.procesado = "S"
+												
+						do objDispOmnicell.%Save()
+					}
+					
+					if tLastOrderId '= "" 
+					{
+						do objDispOmnicell.ordItemTrakSetObjectId(tLastOrderId)
+						do objDispOmnicell.%Save()
+					}
+	
+				}
+				
+			}
+		}
+		
+	} 
+	Catch(tException)
+	{
+		Set tSC = $System.Status.GetErrorText(tException)
+	}
+	
+	set ^jb("Omn2recive","Error")="error "_tSC
+	
+	Quit tSC
+}
