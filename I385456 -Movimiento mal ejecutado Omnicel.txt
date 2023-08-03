@@ -53,7 +53,7 @@ ClassMethod Recive(pRequest As Custom.Omnicell2.DispOmn2) As %Status
 	Set ^zOscarRondon($ZDATETIME($NOW()), 1,9, "pRequest.rut") = pRequest.rut
 	Set ^zOscarRondon($ZDATETIME($NOW()), 1,10, "pRequest.tipoMensaje") = pRequest.tipoMensaje
 	Set ^zOscarRondon($ZDATETIME($NOW()), 1,11, "pRequest.usuario") = pRequest.usuario
-	Set ^zOscarRondon($ZDATETIME($NOW()), 1,12, "pRequest.fechaMovimiento") = pRequest.fechaMovimiento
+	Set ^zOscarRondon($ZDATETIME($NOW()), 1,12, "pRequest.fechaMovimiento") = pRequest.fechaMovimiento.
 	
 	
 	Set tSC = $System.Status.OK()
