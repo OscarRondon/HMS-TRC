@@ -1,3 +1,12 @@
+Methods to Modify
+-------------------------------------------
+
+✅- SENTTOERPBODEGASPERIFESRICAS-OEORDER.CUSTOM
+✅- STOCKUNPACKED-PHARMACY.RETURNPART.EDIT
+✅- STOCKPACKEDERP-PHARMACY.PRESC.EDIT
+✅- RETURNTOERPBODEGASPERIFESRICAS-OEORDER.CUSTOM
+
+
 Queries TRAK
 -------------------------------------------
 select
@@ -126,17 +135,19 @@ Ajustes:
 		
 		Quit exist
 	}
+  
 . Modify Save point:
 	- from:
 		Set tSC = tObjToInsert.%Save()
 	- to:
+    Hang 0.25
 		set saveObj = ..isDispensable(tId, tObjToInsert.TipoMovimiento, tObjToInsert.Cantidad)
 		If saveObj = 0 Set tSC = tObjToInsert.%Save()
 		else 
 			Set tSC = $$$ERROR(-30015,"Cantidad a dispensar o devolver invalida")
-		Hang 0.5
 	
-	-to (for kardex): 
+	-to (for kardex):
+    Hang 0.25 
     set saveObj = ..isDispensable(tId, tObjToInsert.TipoMovimiento, tObjToInsert.Cantidad)
 		If saveObj = 0
 			{
@@ -147,7 +158,6 @@ Ajustes:
 			{
 				Set tSC = $$$ERROR(-30015,"Cantidad a dispensar o devolver invalida")
 			}
-			Hang 0.5
 	
 tObjToInsert.OrderRef, tObjToInsert.Cantidad, tObjToInsert.TipoMovimiento, tObjToInsert.NroDocumento, tObjToInsert.Episodio, tObjToInsert.CodigoERP, tObjToInsert.ProcIngreso
 
