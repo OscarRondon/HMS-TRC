@@ -159,7 +159,3 @@ Ajustes:
 			{
 				Set tSC = $$$ERROR(-30015,"Cantidad a dispensar o devolver invalida")
 			}
-	
-tObjToInsert.OrderRef, tObjToInsert.Cantidad, tObjToInsert.TipoMovimiento, tObjToInsert.NroDocumento, tObjToInsert.Episodio, tObjToInsert.CodigoERP, tObjToInsert.ProcIngreso
-
-tOrderRef, tCantidad, tTipoMovimiento, tNroDocumento, tEpisodio, tCodigoERP, tProcIngreso

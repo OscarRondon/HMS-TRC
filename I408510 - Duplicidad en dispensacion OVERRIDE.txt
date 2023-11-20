@@ -1,0 +1,396 @@
+Solucion:
+------------------------------
+Class: 
+	. Custom.Omnicell2.Orders
+Methods:
+	. CreateOrders *
+	
+Ajustes:
+-------------------------------
+ClassMethod CreateOrders(Hospital As %String, Local As %String, FechaDesde As %String, HoraDesde As %String, FechaHasta As %String, HoraHasta As %String, Paciente As %String, Episodio As %String) As %String
+{
+	
+	set ^jb("CreateOrder",1)= "Hospital "_Hospital_" FechaDesde "_FechaDesde_" FechaHasta "_FechaHasta_" Local "_Local_" Paciente "_Paciente_" Episodio "_Episodio_" HoraDesde "_HoraDesde_" HoraHasta "_HoraHasta
+	Set tSC = $System.Status.OK()
+	Set tResp = "No se pudieron generar todas las indicaciones, vuelva a revisar el reporte"
+	//Set tResp = "En Mantención"
+	
+	
+	/* TRC I408510 */
+ 	/* ================================================================================== */
+	if '$data(^OneProcess(Hospital, Local, FechaDesde, FechaHasta, Paciente, Episodio))
+	{
+		set ^OneProcess(Hospital, Local, FechaDesde, FechaHasta, Paciente, Episodio) = "Processing"
+	}
+	else
+	{
+		Set tResp = "Indicaciones con los parametros de seleccion ya en ejecucion, vuelva a revisar el reporte"
+		Quit tResp
+	}
+	/* ================================================================================== */
+	
+	Try
+	{
+		if Local '=""
+		{
+			if '$data(^CTLOC(Local))
+			{
+				set LocalId = ""
+				set LocalId = ##class(web.CTLoc).GetIdFromCodeOrDescription(Local)
+			
+				if LocalId=""
+				{
+					set LocalId = ##class(web.CTLoc).GetIdFromCodeOrDescription(##class(Custom.HMIL.Report.ZEN.StoredProc.MasterLookups).getLocalRegularizaOmnicell())
+				}
+			
+				if LocalId'=""
+				{
+					set Local=LocalId
+				}
+			}
+		}
+		
+		set tResp = ..ValidateBeforeOrders(Hospital, Local, FechaDesde, HoraDesde, FechaHasta,HoraHasta, Paciente, Episodio)
+		
+		set ^jb("CreateOrder",2)= "tResp "_tResp
+		
+		if tResp '= 1
+		{
+			quit
+		}
+		
+		
+		set (tCantidad,tArcimCode, tArcimDesc,tRut,tNombrePaciente, tLocalCode, tLocalDesc, tPatientId,tNroEpisodio,tCantDet,tFecha,tHora,tTipo,tId)=""
+ 
+ 		Set ind = 1
+ 		set tIdUser = $g(%session.Data("LOGON.USERID"))
+ 		set tPerfilId = $g(%session.Data("LOGON.PROFILEID"))
+ 	
+ 		set ^jb("CreateOrder",3)= "Hospital "_Hospital_" FechaDesde "_FechaDesde_" FechaHasta "_FechaHasta_" Local "_Local_" Paciente "_Paciente_" Episodio "_Episodio
+ 		
+ 		if FechaDesde '= "" set FechaDesde = $zdh(FechaDesde,4)
+		if FechaHasta '= "" set FechaHasta = $zdh(FechaHasta,4)
+		
+		if HoraDesde '= "" set HoraDesde= $zth(HoraDesde,2)
+		if HoraHasta '= "" set HoraHasta= $zth(HoraHasta,2)
+		
+		if HoraDesde = "" set HoraDesde= 0
+		if HoraHasta = "" set HoraHasta= 86400
+		
+		set ^jb("CreateOrder",4)= "Hospital "_Hospital_" FechaDesde "_FechaDesde_" FechaHasta "_FechaHasta_" Local "_Local_" Paciente "_Paciente_" Episodio "_Episodio
+ 
+ 		&sql(declare CreateOmn2Cursor Cursor for
+			select sum(CantidadDisp),itemMastTrak->ARCIM_Code, itemMastTrak->ARCIM_Desc,idPatientTrak->PAPMI_ID,idPatientTrak->PAPMI_Name2||' '||idPatientTrak->PAPMI_Name||' '||idPatientTrak->PAPMI_Name3,localTrak->CTLOC_Code,localTrak->CTLOC_Desc,idPatientTrak,numeroEstadia,itemMastTrak->ARCIM_PHCDF_DR->PHCDF_CTUOM_DR,itemMastTrak
+			into :tCantidad,:tArcimCode, :tArcimDesc,:tRut,:tNombrePaciente, :tLocalCode, :tLocalDesc, :tPatientId,:tNroEpisodio,:tUnitId,:tIdArcim
+			from Custom_HMIL_User.Omnicell2Disp
+			where fechaOriginal >= ISNULL(:FechaDesde,fechaOriginal)
+  		     and fechaOriginal <= ISNULL(:FechaHasta,fechaOriginal)
+  	  	     and procesado = 'N'
+  		     and localTrak = :Local
+  		     and numeroPrescripcion = 'OVERRIDE'
+  		     and tipoArticulo = 'FAR'
+  		     and idPatientTrak = ISNULL(:Paciente,idPatientTrak)
+  		   group by itemMastTrak->ARCIM_Code, itemMastTrak->ARCIM_Desc,idPatientTrak->PAPMI_ID,idPatientTrak->PAPMI_Name2||' '||idPatientTrak->PAPMI_Name||' '||idPatientTrak->PAPMI_Name3,localTrak->CTLOC_Code,localTrak->CTLOC_Desc,idPatientTrak,numeroEstadia,itemMastTrak->ARCIM_PHCDF_DR->PHCDF_CTUOM_DR,itemMastTrak
+		   --having sum(CantidadDisp)> 0 or sum(CantidadDisp)<0 
+		   order by idPatientTrak,itemMastTrak->ARCIM_Code
+ 		   )
+ 		
+ 		
+ 		&sql(open CreateOmn2Cursor)
+ 		&sql(fetch CreateOmn2Cursor)
+ 
+ 		while SQLCODE = 0
+ 		{
+	 		
+	 		///Ajustar cantidad según hora
+	 		&sql(declare LookupRutsOmn2DetCursor Cursor for
+				select %id,CantidadDisp,fechaOriginal, horaOriginal,movimiento,usuario
+				into :tId,:tCantDet, :tFecha, :tHora, :tTipo, :tUsuarioOmn
+				from Custom_HMIL_User.Omnicell2Disp
+				where fechaOriginal >= ISNULL(:FechaDesde,fechaOriginal)
+  		  	  	and fechaOriginal <= ISNULL(:FechaHasta,fechaOriginal)
+  	  	  	  	and procesado = 'N'
+  		   	  	and localTrak = :Local
+  		  	  	and numeroPrescripcion = 'OVERRIDE'
+  		  	  	and tipoArticulo = 'FAR'
+  		      	and idPatientTrak = :tPatientId
+  		  	 	and itemMastTrak = :tIdArcim
+  		  	 	and numeroEstadia = :tNroEpisodio
+  				order by fechaOriginal asc,horaOriginal asc
+ 			)
+	 	
+	 		&sql(open LookupRutsOmn2DetCursor)
+ 			&sql(fetch LookupRutsOmn2DetCursor)
+ 		
+ 			while SQLCODE = 0
+ 			{
+	 			set ok = 1
+	 			if (tFecha = FechaDesde) && (tHora < HoraDesde) set ok =0
+	 			if (tFecha = FechaHasta) && (tHora > HoraHasta) set ok =0
+	 		
+	 			if ok = 0
+	 			{
+		 			set tCantidad = tCantidad-tCantDet
+	 			}
+	 		
+ 				&sql(fetch LookupRutsOmn2DetCursor)
+	 		
+ 			}
+ 			&sql(close LookupRutsOmn2DetCursor)
+	 		
+	 		
+	 		
+	 		
+	 		set ^jb("OmnRegFar",1)="tNroEpisodio "_tNroEpisodio
+	 		set tEpisodeID = ""
+	 		if tNroEpisodio'="" set tEpisodeID = $order(^PAADMi("No",$ZCONVERT(tNroEpisodio,"U"),""))
+	 		
+	 		///Crea ordenes
+	 		if tCantidad > 0
+	 		{
+		 		//Crea Ordenes en estado Solicitado
+	 			set tOK=##class(Custom.HMIL.Integration.ANITA.OEOrdItem).AddOrder(tEpisodeID,tIdArcim,tIdUser,tCantidad,Local,,+$h,$piece($h,",",2),,1,,,,,"","TB","")	
+				    
+				if tOK 
+				{
+					set ^jb("OmnRegFar","Crea",tOK)="tOK "_tOK
+					
+					set tIdRegistroOmnicellERP = "OMN"_$zd(+$h,8)_$translate($zt($piece($h,",",2),2),":","")
+											
+					&sql(update %nolock SQLUSer.OE_OrdItem
+						(oeori_orddept_dr, OEORI_BBExtCode,OEORI_Durat_DR,OEORI_PHFreq_DR,OEORI_Unit_DR, OEORI_PrescNo)
+						values (:Local, :tIdRegistroOmnicellERP,'1','2',:tUnitId,:tIdRegistroOmnicellERP) 
+						where oeori_rowid=:tOK)
+							
+							
+					if (tCantidad > 0) 
+					{
+						job ##class(Custom.ERP.StockHandler).SentToERPFromKardex(tOK,tCantidad,tIdUser)	
+					}
+					
+					
+					///Ajustar cantidad según hora
+	 			 	
+	 				&sql(open LookupRutsOmn2DetCursor)
+ 					&sql(fetch LookupRutsOmn2DetCursor)
+ 		
+ 					while SQLCODE = 0
+ 					{
+	 					set ok = 1
+	 					if (tFecha = FechaDesde) && (tHora < HoraDesde) set ok =0
+	 					if (tFecha = FechaHasta) && (tHora > HoraHasta) set ok =0
+	 		
+	 					if ok = 1
+	 					{
+		 					&sql(Update Custom_HMIL_User.Omnicell2Disp
+ 								set cantidadProcesada = cantidadDisp,
+ 									procesado = 'S',
+ 									ordItemTrak = :tOK
+ 								where %id = :tId
+								)
+		
+	 						&sql(INSERT INTO Custom_HMIL_User.Omnicell2DispRevisiones (Omnicell2Disp,estado,fecha,hora,usuario)
+	   	  						select %id, 'Generacion', current_date, current_time, :tUserId
+	 	  						from Custom_HMIL_User.Omnicell2Disp
+		  						where %id = :tId
+		  						)
+		 				
+		 			
+	 					}	
+	 		
+ 						&sql(fetch LookupRutsOmn2DetCursor)
+	 		
+ 					}		
+ 					&sql(close LookupRutsOmn2DetCursor)
+					
+					
+				}
+	 		}
+	 		
+	 		////Genera Devoluciones
+	 		if tCantidad < 0
+	 		{
+	 			set (tOrderId,TextName,tItems,tErrorDescription,tEpisodeId,PAPMIID,Internal,tIdRegistroOmnicell) = ""
+				set (tOrderId,tItems,tEpisodeId) = ""
+				
+				//set tIdRegistroOmnicell = pRequest.idRegistro
+		
+				set tRestantePorRetornar = tCantidad *-1
+				set tListIdDisp = ""
+		
+				&SQL(declare OrdersReg cursor for
+					select %NOLOCK %ID, OEORI_PhQtyOrd, OEORI_PrescNo, OEORI_ItemStat_DR->OSTAT_Code 
+					INTO :tOEItemId, :tOEORIPhQtyOrd, :tOEORIPrescNo,:tCodStatusOrder
+					from SQLUser.OE_OrdItem 
+					where OEORI_OEORD_ParRef->OEORD_Adm_DR = :tEpisodeID
+					  and OEORI_ItmMast_DR = :tIdArcim
+					  and OEORI_ItemStat_DR->OSTAT_Code = 'V'
+					  and OEORI_RecDep_DR = :Local
+					  and OEORI_Billed <> 'P'
+					  and OEORI_PrescSeqNo is null
+					order by OEORI_SttDat desc, OEORI_SttTim desc
+					)
+			
+					&SQL(OPEN OrdersReg)
+					&SQL(FETCH OrdersReg)
+					set tLastOrderId = ""
+					while(SQLCODE = 0)
+					{
+						if tOEItemId '= ""
+						{
+							set tLastOrderId = tOEItemId
+							if tOEORIPhQtyOrd = "" set tOEORIPhQtyOrd = 0
+							set tCantidadOrder = tOEORIPhQtyOrd
+				
+							if (tCantidadOrder > 0) && (tRestantePorRetornar>0) 
+							{
+								set tCantidadToReturn = 0
+		  					
+		  						if (tCantidadOrder > tRestantePorRetornar)
+		  						{	
+			  						set tCantidadToReturn = tRestantePorRetornar
+		  						}
+		  						else
+		  						{
+			  						set tCantidadToReturn = tCantidadOrder
+		  						}
+		  			
+		  			
+		  					
+								if tCantidadOrder = tCantidadToReturn
+								{
+									do ChangeStatus^COEOrdItem5(tOEItemId,"D",tIdUser,"","")
+									set tRestantePorRetornar = tRestantePorRetornar - tCantidadToReturn
+						
+									
+								}
+								else
+								{
+									//set tIdRegistroOmnicell = "OMN"_$get(tIdRegistroOmnicell)
+						
+									&SQL(Update %nolock SQLUser.OE_OrdItem
+							 			set OEORI_PhQtyOrd =  OEORI_PhQtyOrd - :tCantidadToReturn
+							 			where %id = :tOEItemId  
+							 		)
+							 
+									set tRestantePorRetornar = tRestantePorRetornar - tCantidadToReturn
+								}
+					
+								if tCantidadToReturn > 0 
+								{
+									set ^jb("OmnRegFar","Devol",tOEItemId)="tOEItemId "_tOEItemId_" tCantidadToReturn "_tCantidadToReturn
+									job ##class(Custom.ERP.StockHandler).ReturnOmnicellSuppliesToERP(tOEItemId,tCantidadToReturn,tIdUser)
+								}
+					
+							}
+						}
+			
+						&SQL(FETCH OrdersReg)
+					}
+		
+					&SQL(CLOSE OrdersReg)
+				
+				
+				///Ajustar cantidad según hora
+	 			 	
+	 			&sql(open LookupRutsOmn2DetCursor)
+ 				&sql(fetch LookupRutsOmn2DetCursor)
+ 		
+ 				while SQLCODE = 0
+ 				{
+	 				set ok = 1
+	 				if (tFecha = FechaDesde) && (tHora < HoraDesde) set ok =0
+	 				if (tFecha = FechaHasta) && (tHora > HoraHasta) set ok =0
+	 			
+	 				if ok = 1
+	 				{
+		 				&sql(Update Custom_HMIL_User.Omnicell2Disp
+ 							set cantidadProcesada = cantidadDisp,
+ 								procesado = 'S',
+ 								ordItemTrak = :tLastOrderId
+ 							where %id = :tId
+							)
+		
+	 					&sql(INSERT INTO Custom_HMIL_User.Omnicell2DispRevisiones (Omnicell2Disp,estado,fecha,hora,usuario)
+	   	  					select %id, 'Generacion', current_date, current_time, :tUserId
+	 	  					from Custom_HMIL_User.Omnicell2Disp
+		  					where %id = :tId
+		  					)
+		 				
+		 			
+	 				}	
+	 		
+ 					&sql(fetch LookupRutsOmn2DetCursor)
+	 		
+ 				}		
+ 				&sql(close LookupRutsOmn2DetCursor)					
+				
+				
+				
+	 		}
+	 		
+	 		
+	 		/// Si Cantidad es cero sólo deja los item como procesados ya que se produce efecto cero entre si
+	 		if tCantidad = 0
+	 		{
+		 		///Ajustar cantidad según hora
+	 			 	
+	 			&sql(open LookupRutsOmn2DetCursor)
+ 				&sql(fetch LookupRutsOmn2DetCursor)
+ 		
+ 				while SQLCODE = 0
+ 				{
+	 				set ok = 1
+	 				if (tFecha = FechaDesde) && (tHora < HoraDesde) set ok =0
+	 				if (tFecha = FechaHasta) && (tHora > HoraHasta) set ok =0
+	 		
+	 				if ok = 1
+	 				{
+		 				
+		 				&sql(Update Custom_HMIL_User.Omnicell2Disp
+ 								set cantidadProcesada = cantidadDisp,
+ 									procesado = 'S'
+ 								where %id = :tId
+								)
+								
+		 				&sql(INSERT INTO Custom_HMIL_User.Omnicell2DispRevisiones (Omnicell2Disp,estado,fecha,hora,usuario)
+	   	  					select %id, 'Generacion', current_date, current_time, :tUserId
+	 	  					from Custom_HMIL_User.Omnicell2Disp
+		  					where %id = :tId
+		  					)
+		 				
+		 			
+	 				}	
+	 		
+ 					&sql(fetch LookupRutsOmn2DetCursor)
+	 		
+ 				}		
+ 				&sql(close LookupRutsOmn2DetCursor)
+					
+					
+			}
+	 	
+	 	 	
+	 		&sql(fetch CreateOmn2Cursor)
+ 		}
+ 	
+ 		&sql(close CreateOmn2Cursor)
+ 	
+ 		/* TRC I408510 */
+ 		/* ================================================================================== */
+ 		if $data(^OneProcess(Hospital, Local, FechaDesde, FechaHasta, Paciente, Episodio))
+		{
+			kill ^OneProcess(Hospital, Local, FechaDesde, FechaHasta, Paciente, Episodio)
+		}
+		/* ================================================================================== */
+		
+		
+		Set tResp = "Indicaciones Generadas"
+	}
+	Catch(tException)
+	{
+		Set tSC = $System.Status.GetErrorText(tException)
+		Set tResp = tSC
+	}
+	Quit tResp
+}
