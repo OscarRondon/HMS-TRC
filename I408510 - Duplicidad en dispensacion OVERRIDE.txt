@@ -18,13 +18,13 @@ ClassMethod CreateOrders(Hospital As %String, Local As %String, FechaDesde As %S
 	
 	/* TRC I408510 */
  	/* ================================================================================== */
-	if '$data(^OneProcess(Hospital, Local, FechaDesde, FechaHasta, Paciente, Episodio))
+	if '$data(^OneProcess(Hospital, Local, FechaDesde, FechaHasta, Paciente_"*", Episodio_"*"))
 	{
-		set ^OneProcess(Hospital, Local, FechaDesde, FechaHasta, Paciente, Episodio) = "Processing"
+		set ^OneProcess(Hospital, Local, FechaDesde, FechaHasta, Paciente_"*", Episodio_"*") = "Processing"
 	}
 	else
 	{
-		Set tResp = "Indicaciones con los parametros de seleccion ya en ejecucion, vuelva a revisar el reporte"
+		Set tResp = "Indicaciones con los parametros de seleccion ya en ejecucion, espere unos minutos y vuelva a revisar el reporte"
 		Quit tResp
 	}
 	/* ================================================================================== */
@@ -378,9 +378,9 @@ ClassMethod CreateOrders(Hospital As %String, Local As %String, FechaDesde As %S
  	
  		/* TRC I408510 */
  		/* ================================================================================== */
- 		if $data(^OneProcess(Hospital, Local, FechaDesde, FechaHasta, Paciente, Episodio))
+ 		if $data(^OneProcess(Hospital, Local, FechaDesde, FechaHasta,  Paciente_"*", Episodio_"*"))
 		{
-			kill ^OneProcess(Hospital, Local, FechaDesde, FechaHasta, Paciente, Episodio)
+			kill ^OneProcess(Hospital, Local, FechaDesde, FechaHasta,  Paciente_"*", Episodio_"*")
 		}
 		/* ================================================================================== */
 		
